@@ -54,9 +54,11 @@ def summarize_articles(articles: list[dict], journal: str, client: OpenAI) -> st
             messages=[{"role": "user", "content": prompt}],
             max_tokens=1200,
         )
-        return response.choices[0].message.content.strip()
+        result = response.choices[0].message.content.strip()
+        print(result)
+        return result
     except Exception as e:
-        print(f"Warning: LLM summarization failed for {journal}: {e}")
+        print(f"  [ERROR] LLM 呼叫失敗: {e}")
         return "\n".join(f"• {a['title']}" for a in articles)
 
 
@@ -107,7 +109,7 @@ def build_slack_payload(summaries: dict[str, str], articles: dict[str, list]) ->
 def send_to_slack(webhook_url: str, payload: dict) -> None:
     response = requests.post(webhook_url, json=payload, timeout=15)
     response.raise_for_status()
-    print("Slack notification sent successfully.")
+    print("  [OK] Slack 通知已送出")
 
 
 def main() -> None:
@@ -131,16 +133,27 @@ def main() -> None:
     all_summaries: dict[str, str] = {}
 
     for journal, rss_url in FEEDS.items():
-        print(f"Fetching {journal} RSS...")
+        print(f"\n{'='*50}")
+        print(f"  {journal}")
+        print(f"{'='*50}")
+
+        print(f"\n[1/2] 抓取 RSS Feed...")
         all_articles[journal] = fetch_articles(rss_url)
-        print(f"  Found {len(all_articles[journal])} articles.")
+        articles = all_articles[journal]
+        print(f"  取得 {len(articles)} 篇文章：")
+        for i, a in enumerate(articles, 1):
+            pub = f"  ({a['published']})" if a['published'] else ""
+            print(f"  [{i}] {a['title']}{pub}")
 
-        print(f"Summarizing {journal} with LLM...")
-        all_summaries[journal] = summarize_articles(all_articles[journal], journal, client)
+        print(f"\n[2/2] 呼叫 LLM 產生摘要 (model: {OPENROUTER_MODEL})...")
+        all_summaries[journal] = summarize_articles(articles, journal, client)
 
+    print(f"\n{'='*50}")
+    print("  發送 Slack 通知")
+    print(f"{'='*50}\n")
     payload = build_slack_payload(all_summaries, all_articles)
-    print("Sending to Slack...")
     send_to_slack(webhook_url, payload)
+    print("\n完成！")
 
 
 if __name__ == "__main__":
