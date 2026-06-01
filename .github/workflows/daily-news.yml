@@ -1,0 +1,32 @@
+name: Daily Scientific News
+
+on:
+  schedule:
+    # 每天 UTC 01:00 = 台灣時間 09:00
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    # 允許手動從 GitHub UI 觸發，方便測試
+
+jobs:
+  fetch-and-notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run scientific news agent
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.SCIENTIFIC_NEWS_AGENT_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: python agent.py
