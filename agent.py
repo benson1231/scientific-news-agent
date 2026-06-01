@@ -1,10 +1,11 @@
 import os
 import re
 import sys
+import time
 import feedparser
 import requests
 from datetime import datetime, timezone, timedelta
-from openai import OpenAI
+from openai import OpenAI, RateLimitError
 
 FEEDS = {
     "Nature": "https://www.nature.com/nature.rss",
@@ -12,7 +13,19 @@ FEEDS = {
 }
 
 MAX_ARTICLES_PER_JOURNAL = 5
-OPENROUTER_MODEL = "meta-llama/llama-3.2-3b-instruct:free"
+
+OPENROUTER_HEADERS = {
+    "HTTP-Referer": "https://github.com/benson1231/scientific-news-agent",
+    "X-OpenRouter-Title": "Scientific News Agent",
+}
+
+# 依序嘗試，rate limit 時自動切換下一個
+OPENROUTER_MODELS = [
+    "meta-llama/llama-3.2-3b-instruct:free",
+    "mistralai/mistral-7b-instruct:free",
+    "google/gemma-2-9b-it:free",
+    "meta-llama/llama-3.1-8b-instruct:free",
+]
 
 
 def strip_html(text: str) -> str:
@@ -32,6 +45,48 @@ def fetch_articles(rss_url: str, max_articles: int = MAX_ARTICLES_PER_JOURNAL) -
     return articles
 
 
+def call_llm(client: OpenAI, prompt: str, max_tokens: int = 1200) -> str | None:
+    """依序嘗試各個免費模型，rate limit 時切換下一個；全部失敗則等待後重試一次。"""
+    min_wait = 35
+    for model in OPENROUTER_MODELS:
+        try:
+            print(f"    >> 嘗試模型: {model}")
+            response = client.chat.completions.create(
+                extra_headers=OPENROUTER_HEADERS,
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+            )
+            print(f"    >> 成功使用: {model}")
+            return response.choices[0].message.content.strip()
+        except RateLimitError as e:
+            wait = 35
+            try:
+                wait = int(e.body["error"]["metadata"]["retry_after_seconds"]) + 5
+            except (KeyError, TypeError, AttributeError):
+                pass
+            min_wait = min(min_wait, wait)
+            print(f"    >> Rate limit: {model}，切換下一個...")
+        except Exception as e:
+            print(f"    >> 失敗: {model} — {e}")
+
+    print(f"    >> 所有模型都被限速，等待 {min_wait} 秒後重試...")
+    time.sleep(min_wait)
+    try:
+        model = OPENROUTER_MODELS[0]
+        print(f"    >> 重試: {model}")
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=max_tokens,
+        )
+        print(f"    >> 成功使用: {model}")
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"    >> 重試失敗: {e}")
+        return None
+
+
 def summarize_articles(articles: list[dict], journal: str, client: OpenAI) -> str:
     if not articles:
         return f"今日 {journal} 暫無新文章。"
@@ -48,18 +103,13 @@ def summarize_articles(articles: list[dict], journal: str, client: OpenAI) -> st
         f"請以條列格式回覆，每篇以「[數字]」開頭，包含論文標題（繁體中文翻譯）與摘要。"
     )
 
-    try:
-        response = client.chat.completions.create(
-            model=OPENROUTER_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=1200,
-        )
-        result = response.choices[0].message.content.strip()
+    result = call_llm(client, prompt)
+    if result:
         print(result)
         return result
-    except Exception as e:
-        print(f"  [ERROR] LLM 呼叫失敗: {e}")
-        return "\n".join(f"• {a['title']}" for a in articles)
+
+    print("    >> LLM 全部失敗，僅輸出標題")
+    return "\n".join(f"• {a['title']}" for a in articles)
 
 
 def build_slack_payload(summaries: dict[str, str], articles: dict[str, list]) -> dict:
@@ -123,10 +173,6 @@ def main() -> None:
     client = OpenAI(
         base_url="https://openrouter.ai/api/v1",
         api_key=api_key,
-        default_headers={
-            "HTTP-Referer": "https://github.com/benson1231/scientific-news-agent",
-            "X-Title": "Scientific News Agent",
-        },
     )
 
     all_articles: dict[str, list] = {}
@@ -145,7 +191,7 @@ def main() -> None:
             pub = f"  ({a['published']})" if a['published'] else ""
             print(f"  [{i}] {a['title']}{pub}")
 
-        print(f"\n[2/2] 呼叫 LLM 產生摘要 (model: {OPENROUTER_MODEL})...")
+        print(f"\n[2/2] 呼叫 LLM 產生摘要（依序嘗試 {len(OPENROUTER_MODELS)} 個免費模型）...")
         all_summaries[journal] = summarize_articles(articles, journal, client)
 
     print(f"\n{'='*50}")
