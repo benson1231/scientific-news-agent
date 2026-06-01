@@ -19,12 +19,11 @@ OPENROUTER_HEADERS = {
     "X-OpenRouter-Title": "Scientific News Agent",
 }
 
-# 依序嘗試，rate limit 時自動切換下一個
+# openrouter/free 會自動從目前可用的免費模型中選擇，無需維護 model ID 清單
+# 後面的 llama 作為備援（萬一 free router 也被限速）
 OPENROUTER_MODELS = [
+    "openrouter/free",
     "meta-llama/llama-3.2-3b-instruct:free",
-    "mistralai/mistral-7b-instruct:free",
-    "google/gemma-2-9b-it:free",
-    "meta-llama/llama-3.1-8b-instruct:free",
 ]
 
 
