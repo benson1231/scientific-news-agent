@@ -54,9 +54,17 @@ def fetch_articles(
             continue
         if link_filter and link_filter not in link:
             continue
+        raw_summary = strip_html(entry.get("summary", entry.get("description", "")))
+        # 清除 "Journal, Published online: Date; doi:XXX" 前綴
+        clean_summary = re.sub(
+            r'^[\w\s]+,\s*Published online:[^;]+;\s*doi:\S+\s*', '', raw_summary
+        ).strip()
+        # 若清除後與標題相同或為空，標記為無摘要
+        if not clean_summary or clean_summary == title:
+            clean_summary = "(RSS 未提供摘要)"
         articles.append({
             "title": title,
-            "summary": strip_html(entry.get("summary", entry.get("description", "")))[:600],
+            "summary": clean_summary[:800],
             "link": link,
             "published": entry.get("published", ""),
         })
