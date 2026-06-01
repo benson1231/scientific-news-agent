@@ -77,8 +77,11 @@ def call_llm(client: OpenAI, prompt: str, max_tokens: int = 1200) -> str | None:
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=max_tokens,
             )
+            content = response.choices[0].message.content
+            if not content:
+                raise ValueError("empty response content")
             print(f"    >> 成功使用: {model}")
-            return response.choices[0].message.content.strip()
+            return content.strip()
         except RateLimitError as e:
             wait = 35
             try:
@@ -96,12 +99,16 @@ def call_llm(client: OpenAI, prompt: str, max_tokens: int = 1200) -> str | None:
         model = OPENROUTER_MODELS[0]
         print(f"    >> 重試: {model}")
         response = client.chat.completions.create(
+            extra_headers=OPENROUTER_HEADERS,
             model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=max_tokens,
         )
+        content = response.choices[0].message.content
+        if not content:
+            raise ValueError("empty response content")
         print(f"    >> 成功使用: {model}")
-        return response.choices[0].message.content.strip()
+        return content.strip()
     except Exception as e:
         print(f"    >> 重試失敗: {e}")
         return None
@@ -123,7 +130,7 @@ def summarize_articles(articles: list[dict], journal: str, client: OpenAI) -> st
         f"請以條列格式回覆，每篇以「[數字]」開頭，包含論文標題（繁體中文翻譯）與摘要。"
     )
 
-    result = call_llm(client, prompt)
+    result = call_llm(client, prompt, max_tokens=2000)
     if result:
         print(result)
         return result
