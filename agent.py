@@ -31,16 +31,30 @@ def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text).strip()
 
 
+SKIP_PREFIXES = (
+    "Author Correction:",
+    "Publisher Correction:",
+    "Correction:",
+    "Erratum:",
+    "Retraction:",
+)
+
+
 def fetch_articles(rss_url: str, max_articles: int = MAX_ARTICLES_PER_JOURNAL) -> list[dict]:
     feed = feedparser.parse(rss_url)
     articles = []
-    for entry in feed.entries[:max_articles]:
+    for entry in feed.entries:
+        title = strip_html(entry.get("title", ""))
+        if any(title.startswith(prefix) for prefix in SKIP_PREFIXES):
+            continue
         articles.append({
-            "title": strip_html(entry.get("title", "")),
+            "title": title,
             "summary": strip_html(entry.get("summary", entry.get("description", "")))[:600],
             "link": entry.get("link", ""),
             "published": entry.get("published", ""),
         })
+        if len(articles) >= max_articles:
+            break
     return articles
 
 
